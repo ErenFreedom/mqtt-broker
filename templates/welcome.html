@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between mb-3">
+  <h3>Dashboard</h3>
+  <a href="/logout" class="btn btn-danger">Logout</a>
+</div>
+
+<div class="card p-3 mb-4">
+  <form method="POST" action="/activation" class="row g-2">
+    <div class="col-md-3">
+      <input class="form-control" name="api_name" placeholder="API Name" required>
+    </div>
+    <div class="col-md-7">
+      <input class="form-control" name="api_url" placeholder="API URL" required>
+    </div>
+    <div class="col-md-2 d-grid">
+      <button class="btn btn-success">Activate</button>
+    </div>
+  </form>
+</div>
+
+<div class="row">
+{% for name, url in apis.items() %}
+  <div class="col-md-4">
+    <div class="card mb-3 shadow-sm">
+      <div class="card-body">
+        <h6>{{ name }}</h6>
+        <small class="text-muted">{{ url }}</small>
+
+        <div class="d-flex gap-2 mt-2">
+          <a href="/live/{{ name }}" class="btn btn-primary btn-sm w-100">Live</a>
+          <form method="POST" action="/delete/{{ name }}"
+                onsubmit="return confirm('Delete {{ name }}?')">
+            <button class="btn btn-outline-danger btn-sm">🗑</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% else %}
+<p>No API activated</p>
+{% endfor %}
+</div>
+
+{% endblock %}

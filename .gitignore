@@ -1,0 +1,30 @@
+cat > .gitignore << 'EOF'
+# Python / virtual environments
+venv/
+.venv/
+env/
+*.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# PyInstaller junk (never commit these)
+build/
+dist/
+*.spec
+*.egg-info/
+.eggs/
+
+# Temporary / session files (add more if needed)
+session_data/
+*.log
+*.sqlite3
+*.db
+
+# Editor / OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+EOF

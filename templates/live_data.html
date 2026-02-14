@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+
+<a href="/welcome" class="btn btn-secondary mb-3">⬅ Back to Home</a>
+
+<h4>Live API : {{ api_name }}</h4>
+
+<div class="card p-4 text-center">
+  <h1 id="value" class="display-4 text-success">--</h1>
+</div>
+
+<script>
+function load() {
+  fetch("/fetch/{{ api_name }}")
+    .then(r => r.json())
+    .then(d => {
+      let v = "--";
+      if (Array.isArray(d) && d[0]?.Value?.Value !== undefined)
+        v = d[0].Value.Value;
+      document.getElementById("value").innerText = v;
+    })
+    .catch(() => {
+      document.getElementById("value").innerText = "Error";
+    });
+}
+setInterval(load, 5000);
+load();
+</script>
+
+{% endblock %}

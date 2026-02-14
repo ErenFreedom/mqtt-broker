@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4>Activate API</h4>
+<form method="post" class="card p-3" style="max-width:500px">
+  <input class="form-control mb-2" name="api_name" placeholder="API Name">
+  <input class="form-control mb-3" name="api_url" placeholder="API URL">
+  <button class="btn btn-success">Add API</button>
+</form>
+
+{% endblock %}
