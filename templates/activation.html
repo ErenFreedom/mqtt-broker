@@ -1,11 +1,32 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h4>Activate API</h4>
-<form method="post" class="card p-3" style="max-width:500px">
-  <input class="form-control mb-2" name="api_name" placeholder="API Name">
-  <input class="form-control mb-3" name="api_url" placeholder="API URL">
-  <button class="btn btn-success">Add API</button>
+<h4 class="mb-3">Activate API</h4>
+
+<form method="post" action="/activation" class="card p-4 shadow" style="max-width:500px">
+
+  <!-- API Name -->
+  <label class="form-label">API Name</label>
+  <input class="form-control mb-3" name="api_name" placeholder="Enter API Name" required>
+
+  <!-- API URL -->
+  <label class="form-label">API URL</label>
+  <input class="form-control mb-3" name="api_url" placeholder="Enter API URL" required>
+
+  <!-- Interval Dropdown -->
+  <label class="form-label">Fetch Interval</label>
+  <select name="interval" class="form-select mb-3" required>
+      <option value="2">2 Seconds</option>
+      <option value="5">5 Seconds</option>
+      <option value="10">10 Seconds</option>
+      <option value="15">15 Seconds</option>
+      <option value="30">30 Seconds</option>
+      <option value="40">40 Seconds</option>
+      <option value="60">60 Seconds</option>
+  </select>
+
+  <button class="btn btn-success w-100">Activate API</button>
+
 </form>
 
 {% endblock %}
