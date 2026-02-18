@@ -50,7 +50,7 @@ def load_json(path):
 
 api_store = load_json(API_FILE)
 
-# ================= MQTT (v5 - No Warning) =================
+# ================= MQTT =================
 MQTT_BROKER = "34.14.145.160"
 MQTT_PORT = 1883
 MQTT_USER = "mqttuser"
@@ -65,21 +65,15 @@ def on_connect(client, userdata, flags, reasonCode, properties):
     else:
         print("❌ MQTT Connection Failed:", reasonCode)
 
-def on_disconnect(client, userdata, reasonCode, properties):
-    print("⚠ MQTT Disconnected")
-
 mqtt_client.on_connect = on_connect
-mqtt_client.on_disconnect = on_disconnect
 mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
 mqtt_client.loop_start()
 
 # ================= TOKEN =================
 def request_token(url, user, pwd):
     global current_token
-
     payload = f"grant_type=password&username={user}&password={pwd}"
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
     try:
         r = requests.post(url, data=payload, headers=headers, verify=False, timeout=5)
         r.raise_for_status()
@@ -98,41 +92,39 @@ def extract_value(response_json):
         return None
 
 # ================= BACKGROUND PUBLISHER =================
-def api_publisher(api_name, api_url, interval, token_api, username, password):
-
-    topic = f"building/{api_name}"
+def api_publisher(api_name, api_url, interval, location, token_api, username, password):
+    topic = f"building/{location}/{api_name}"
     api_status[api_name] = "offline"
-
+    global current_token
     print(f"🚀 Started {api_name} every {interval}s")
 
-    global current_token
-
     while running_threads.get(api_name):
-
         try:
-            # Get token if missing
             if not current_token:
+                print("🔑 Generating new token...")
                 token = request_token(token_api, username, password)
                 if not token:
                     time.sleep(interval)
                     continue
 
             headers = {"Authorization": f"Bearer {current_token}"}
-
             r = requests.get(api_url, headers=headers, verify=False, timeout=5)
 
-            # Token expired
+            # Token expired → regenerate immediately and retry
             if r.status_code == 401:
-                print("⚠ Token expired. Refreshing...")
-                current_token = None
-                time.sleep(2)
-                continue
+                print("⚠ Token expired. Regenerating...")
+                new_token = request_token(token_api, username, password)
+                if not new_token:
+                    time.sleep(interval)
+                    continue
+                headers = {"Authorization": f"Bearer {new_token}"}
+                r = requests.get(api_url, headers=headers, verify=False, timeout=5)
 
             r.raise_for_status()
-
             value = extract_value(r.json())
 
             payload = {
+                "location": location,
                 "device": api_name,
                 "value": value,
                 "timestamp": int(time.time())
@@ -149,26 +141,13 @@ def api_publisher(api_name, api_url, interval, token_api, username, password):
 
         time.sleep(interval)
 
-    print(f"🛑 Stopped {api_name}")
-
 # ================= ROUTES =================
 @app.route("/")
 def index():
-
     login_data = load_json(LOGIN_FILE)
-
-    if (
-        login_data
-        and login_data.get("username")
-        and login_data.get("password")
-        and login_data.get("token_api")
-    ):
-
+    if login_data:
         session["logged_in"] = True
-        session["username"] = login_data["username"]
-        session["password"] = login_data["password"]
-        session["token_api"] = login_data["token_api"]
-
+        session.update(login_data)
         # Start saved APIs
         for name, data in api_store.items():
             if not running_threads.get(name):
@@ -179,30 +158,25 @@ def index():
                         name,
                         data["url"],
                         data["interval"],
+                        data.get("location", "Unknown"),
                         login_data["token_api"],
                         login_data["username"],
                         login_data["password"],
                     ),
                     daemon=True
                 ).start()
-
         return redirect("/welcome")
-
     return redirect("/login")
-
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     global current_token
-
     if request.method == "POST":
-
         token = request_token(
             request.form["token_api"],
             request.form["username"],
             request.form["password"]
         )
-
         if not token:
             flash("Login Failed", "danger")
             return render_template("login.html")
@@ -212,39 +186,30 @@ def login():
             "password": request.form["password"],
             "token_api": request.form["token_api"]
         }
-
         save_json(LOGIN_FILE, login_data)
-
         session["logged_in"] = True
-        session["username"] = login_data["username"]
-        session["password"] = login_data["password"]
-        session["token_api"] = login_data["token_api"]
-
+        session.update(login_data)
         return redirect("/welcome")
-
     return render_template("login.html")
-
 
 @app.route("/welcome")
 def welcome():
     if not session.get("logged_in"):
         return redirect("/login")
-
     return render_template("welcome.html", apis=api_store, api_status=api_status)
-
 
 @app.route("/activation", methods=["POST"])
 def activation():
-
+    location = request.form["location"]
     api_name = request.form["api_name"]
-    api_url = request.form["api_url"]
     interval = int(request.form["interval"])
+    api_url = request.form["api_url"]
 
     api_store[api_name] = {
         "url": api_url,
-        "interval": interval
+        "interval": interval,
+        "location": location
     }
-
     save_json(API_FILE, api_store)
 
     if not running_threads.get(api_name):
@@ -255,6 +220,7 @@ def activation():
                 api_name,
                 api_url,
                 interval,
+                location,
                 session["token_api"],
                 session["username"],
                 session["password"]
@@ -265,20 +231,6 @@ def activation():
     flash("API Activated", "success")
     return redirect("/welcome")
 
-
-@app.route("/delete/<api_name>", methods=["POST"])
-def delete_api(api_name):
-
-    running_threads.pop(api_name, None)
-    api_store.pop(api_name, None)
-    api_status.pop(api_name, None)
-
-    save_json(API_FILE, api_store)
-
-    flash("API Deleted", "info")
-    return redirect("/welcome")
-
-
 # -------- LIVE PAGE --------
 @app.route("/live/<api_name>")
 def live(api_name):
@@ -286,46 +238,37 @@ def live(api_name):
         return "API Not Found", 404
     return render_template("live_data.html", api_name=api_name)
 
-
 @app.route("/fetch/<api_name>")
 def fetch(api_name):
-
     if api_name not in api_store:
         return jsonify({"error": "API not found"})
-
     try:
         headers = {"Authorization": f"Bearer {current_token}"}
-
-        r = requests.get(
-            api_store[api_name]["url"],
-            headers=headers,
-            verify=False,
-            timeout=5
-        )
-
-        if r.status_code == 401:
-            return jsonify({"error": "Token expired"})
-
+        r = requests.get(api_store[api_name]["url"], headers=headers, verify=False, timeout=5)
         r.raise_for_status()
         return jsonify(r.json())
-
     except Exception as e:
         return jsonify({"error": str(e)})
 
+# -------- DELETE API --------
+@app.route("/delete/<api_name>", methods=["POST"])
+def delete_api(api_name):
+    running_threads.pop(api_name, None)
+    removed = api_store.pop(api_name, None)
+    api_status.pop(api_name, None)
+    save_json(API_FILE, api_store)
+    if removed:
+        flash(f"API '{api_name}' Deleted Successfully", "info")
+    else:
+        flash(f"API '{api_name}' Not Found", "warning")
+    return redirect("/welcome")
 
 @app.route("/logout")
 def logout():
-
     global current_token
     current_token = None
-
     session.clear()
-
-    if os.path.exists(LOGIN_FILE):
-        os.remove(LOGIN_FILE)
-
     return redirect("/login")
-
 
 # ================= DESKTOP =================
 def start_flask():
