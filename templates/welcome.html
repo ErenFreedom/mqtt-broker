@@ -6,7 +6,7 @@
   <a href="/logout" class="btn btn-danger">Logout</a>
 </div>
 
-<!-- Activate API Form -->
+<!-- Activate API -->
 <div class="card p-3 mb-4">
   <form method="POST" action="/activation" class="row g-2 align-items-end">
 
@@ -28,12 +28,9 @@
     <div class="col-md-2">
       <label class="form-label">Interval</label>
       <select name="interval" class="form-select" required>
-        <option value="2">2 sec</option>
         <option value="5">5 sec</option>
         <option value="10">10 sec</option>
-        <option value="15">15 sec</option>
         <option value="30">30 sec</option>
-        <option value="40">40 sec</option>
         <option value="60">60 sec</option>
       </select>
     </div>
@@ -45,7 +42,7 @@
   </form>
 </div>
 
-<!-- Active APIs List -->
+<!-- API Cards -->
 <div class="row">
 {% for name, data in apis.items() %}
   <div class="col-md-4">
@@ -54,13 +51,12 @@
         <h6>{{ data.location }} - {{ name }}</h6>
         <small class="text-muted">{{ data.url }}</small>
 
-        <!-- Status Badge -->
         <p class="mt-2">
           Status:
           {% if api_status.get(name) == "online" %}
-            <span class="badge bg-success">🟢 Online</span>
+            <span class="badge bg-success">Online</span>
           {% else %}
-            <span class="badge bg-danger">🔴 Offline</span>
+            <span class="badge bg-danger">Offline</span>
           {% endif %}
         </p>
 
@@ -68,7 +64,7 @@
           <a href="/live/{{ name }}" class="btn btn-primary btn-sm w-100">Live</a>
           <form method="POST" action="/delete/{{ name }}"
                 onsubmit="return confirm('Delete {{ name }}?')">
-            <button class="btn btn-outline-danger btn-sm">🗑</button>
+            <button class="btn btn-outline-danger btn-sm">Delete</button>
           </form>
         </div>
       </div>
