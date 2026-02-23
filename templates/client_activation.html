@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card p-4 mx-auto" style="max-width:500px">
+  <h4 class="mb-3">Client Activation</h4>
+
+  <form method="post">
+
+    <label class="form-label">Client ID</label>
+    <input class="form-control mb-3" name="client_id" required>
+
+    <label class="form-label">Site ID</label>
+    <input class="form-control mb-3" name="site_id" required>
+
+    <label class="form-label">Security Key</label>
+    <input class="form-control mb-3" name="security_key" required>
+
+    <button class="btn btn-success w-100">Verify & Continue</button>
+
+  </form>
+</div>
+
+{% endblock %}
