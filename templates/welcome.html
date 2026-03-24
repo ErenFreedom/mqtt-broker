@@ -6,25 +6,21 @@
   <a href="/logout" class="btn btn-danger">Logout</a>
 </div>
 
-<!-- Activate API -->
+<!-- Activate API Form -->
 <div class="card p-3 mb-4">
   <form method="POST" action="/activation" class="row g-2 align-items-end">
-
-    <div class="col-md-3">
+    <div class="col-md-2">
       <label class="form-label">Location</label>
       <input class="form-control" name="location" placeholder="Location" required>
     </div>
-
-    <div class="col-md-3">
+    <div class="col-md-2">
       <label class="form-label">API Name</label>
       <input class="form-control" name="api_name" placeholder="API Name" required>
     </div>
-
-    <div class="col-md-4">
+    <div class="col-md-5">
       <label class="form-label">API URL</label>
       <input class="form-control" name="api_url" placeholder="API URL" required>
     </div>
-
     <div class="col-md-2">
       <label class="form-label">Interval</label>
       <select name="interval" class="form-select" required>
@@ -34,45 +30,166 @@
         <option value="60">60 sec</option>
       </select>
     </div>
-
-    <div class="col-md-2 d-grid">
+    <div class="col-md-1 d-grid">
+      <label class="form-label">&nbsp;</label>
       <button class="btn btn-success">Activate</button>
     </div>
-
   </form>
 </div>
 
-<!-- API Cards -->
-<div class="row">
-{% for name, data in apis.items() %}
-  <div class="col-md-4">
-    <div class="card mb-3 shadow-sm">
-      <div class="card-body">
-        <h6>{{ data.location }} - {{ name }}</h6>
-        <small class="text-muted">{{ data.url }}</small>
-
-        <p class="mt-2">
-          Status:
-          {% if api_status.get(name) == "online" %}
-            <span class="badge bg-success">Online</span>
-          {% else %}
-            <span class="badge bg-danger">Offline</span>
-          {% endif %}
-        </p>
-
-        <div class="d-flex gap-2 mt-2">
-          <a href="/live/{{ name }}" class="btn btn-primary btn-sm w-100">Live</a>
-          <form method="POST" action="/delete/{{ name }}"
-                onsubmit="return confirm('Delete {{ name }}?')">
-            <button class="btn btn-outline-danger btn-sm">Delete</button>
-          </form>
-        </div>
-      </div>
+<!-- Stats Row -->
+<div class="row mb-3">
+  <div class="col-md-3">
+    <div class="card text-center p-2 bg-primary text-white">
+      <h5 class="mb-0">{{ apis|length }}</h5>
+      <small>Total APIs</small>
     </div>
   </div>
-{% else %}
-<p>No API activated</p>
-{% endfor %}
+  <div class="col-md-3">
+    <div class="card text-center p-2 bg-success text-white">
+      <h5 class="mb-0" id="onlineCount">0</h5>
+      <small>Online</small>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center p-2 bg-danger text-white">
+      <h5 class="mb-0" id="offlineCount">0</h5>
+      <small>Offline</small>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center p-2 bg-secondary text-white">
+      <h5 class="mb-0" id="filteredCount">0</h5>
+      <small>Showing</small>
+    </div>
+  </div>
 </div>
+
+<!-- Search + Filter -->
+<div class="row mb-3 g-2">
+  <div class="col-md-6">
+    <input type="text" id="searchInput" class="form-control" placeholder="🔍 Search by name, location, URL...">
+  </div>
+  <div class="col-md-3">
+    <select id="statusFilter" class="form-select">
+      <option value="all">All Status</option>
+      <option value="online">Online Only</option>
+      <option value="offline">Offline Only</option>
+    </select>
+  </div>
+  <div class="col-md-3">
+    <select id="locationFilter" class="form-select">
+      <option value="all">All Locations</option>
+      {% set locations = [] %}
+      {% for name, data in apis.items() %}
+        {% if data.location not in locations %}
+          {% set _ = locations.append(data.location) %}
+          <option value="{{ data.location }}">{{ data.location }}</option>
+        {% endif %}
+      {% endfor %}
+    </select>
+  </div>
+</div>
+
+<!-- API Table -->
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+      <table class="table table-hover table-bordered mb-0" id="apiTable">
+        <thead class="table-dark sticky-top">
+          <tr>
+            <th>#</th>
+            <th>Location</th>
+            <th>API Name</th>
+            <th>URL</th>
+            <th>Interval</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="apiTableBody">
+          {% for name, data in apis.items() %}
+          <tr class="api-row"
+              data-name="{{ name }}"
+              data-location="{{ data.location }}"
+              data-url="{{ data.url }}"
+              data-status="{{ api_status.get(name, 'offline') }}">
+            <td>{{ loop.index }}</td>
+            <td>{{ data.location }}</td>
+            <td><strong>{{ name }}</strong></td>
+            <td>
+              <span class="d-inline-block text-truncate" style="max-width:250px;" title="{{ data.url }}">
+                {{ data.url }}
+              </span>
+            </td>
+            <td>{{ data.interval }}s</td>
+            <td>
+              {% if api_status.get(name) == "online" %}
+                <span class="badge bg-success">Online</span>
+              {% else %}
+                <span class="badge bg-danger">Offline</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="d-flex gap-1">
+                <a href="/live/{{ name }}" class="btn btn-primary btn-sm">Live</a>
+                <form method="POST" action="/delete/{{ name }}"
+                      onsubmit="return confirm('Delete {{ name }}?')">
+                  <button class="btn btn-outline-danger btn-sm">Delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7" class="text-center text-muted py-4">No API activated</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+function filterTable() {
+  const search   = document.getElementById("searchInput").value.toLowerCase();
+  const status   = document.getElementById("statusFilter").value;
+  const location = document.getElementById("locationFilter").value;
+  const rows     = document.querySelectorAll(".api-row");
+
+  let shown = 0, online = 0, offline = 0;
+
+  rows.forEach(row => {
+    const name      = row.dataset.name.toLowerCase();
+    const loc       = row.dataset.location.toLowerCase();
+    const url       = row.dataset.url.toLowerCase();
+    const rowStatus = row.dataset.status;
+
+    if (rowStatus === "online") online++;
+    else offline++;
+
+    const matchSearch   = name.includes(search) || loc.includes(search) || url.includes(search);
+    const matchStatus   = status === "all" || rowStatus === status;
+    const matchLocation = location === "all" || row.dataset.location === location;
+
+    if (matchSearch && matchStatus && matchLocation) {
+      row.style.display = "";
+      shown++;
+    } else {
+      row.style.display = "none";
+    }
+  });
+
+  document.getElementById("onlineCount").innerText  = online;
+  document.getElementById("offlineCount").innerText  = offline;
+  document.getElementById("filteredCount").innerText = shown;
+}
+
+document.getElementById("searchInput").addEventListener("input", filterTable);
+document.getElementById("statusFilter").addEventListener("change", filterTable);
+document.getElementById("locationFilter").addEventListener("change", filterTable);
+window.onload = filterTable;
+</script>
 
 {% endblock %}
