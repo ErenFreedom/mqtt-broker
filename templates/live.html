@@ -11,8 +11,10 @@
 </div>
 
 <script>
+const apiName = "{{ api_name | urlencode }}";
+
 function load() {
-  fetch("/fetch/{{ api_name }}")
+  fetch("/fetch/" + apiName)
     .then(res => res.json())
     .then(data => {
       if(data.value !== null && data.value !== undefined){
