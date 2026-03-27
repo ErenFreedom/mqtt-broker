@@ -1,23 +1,45 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="card p-4 mx-auto" style="max-width:500px">
-  <h4 class="mb-3">Client Activation</h4>
+<div class="card p-4 mx-auto shadow" style="max-width:500px">
+
+  <h4 class="mb-3 text-center">⚙️ Device Activation</h4>
+
+  <p class="text-muted text-center mb-4">
+    This device is not activated yet.<br>
+    Send an activation request to the administrator.
+  </p>
+
+  <!-- Flash messages -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for c, m in messages %}
+      <div class="alert alert-{{ c }} alert-dismissible fade show">
+        {{ m }}
+        <button class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  <!-- Site ID -->
+  <label class="form-label">Site ID</label>
+  <input 
+    class="form-control mb-4" 
+    value="{{ session.site_id }}" 
+    readonly
+  >
+
+  <!-- Info -->
+  <div class="alert alert-warning text-center mb-4">
+    Activation request will be sent to admin.<br>
+    Please wait for approval.
+  </div>
 
   <form method="post">
-
-    <label class="form-label">Client ID</label>
-    <input class="form-control mb-3" name="client_id" required>
-
-    <label class="form-label">Site ID</label>
-    <input class="form-control mb-3" name="site_id" required>
-
-    <label class="form-label">Security Key</label>
-    <input class="form-control mb-3" name="security_key" required>
-
-    <button class="btn btn-success w-100">Verify & Continue</button>
-
+    <button class="btn btn-warning w-100">
+      Send Activation Request
+    </button>
   </form>
+
 </div>
 
 {% endblock %}

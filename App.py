@@ -8,11 +8,49 @@ import logging
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, request, redirect, session, flash, jsonify
-
+CLOUD_URL = "http://34.14.145.160/api/edge"
 from database_service import (
     create_sensor, save_sensor_data, get_latest_sensor_value, save_client_info
 )
 from mqtt_service import CLIENT_INFO, publish_sensor_data
+
+DEVICE_STATE = {
+    "verified": False
+}
+
+import hashlib
+import uuid
+import platform
+
+import hmac
+
+DEVICE_FILE = os.path.join(BASE_DIR, "device.json")
+
+def save_device(data):
+    with open(DEVICE_FILE, "w") as f:
+        json.dump(data, f)
+
+def load_device():
+    if os.path.exists(DEVICE_FILE):
+        with open(DEVICE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def generate_signature(email, device_secret):
+    timestamp = int(time.time() * 1000)
+    payload = f"{email}:{timestamp}"
+
+    signature = hmac.new(
+        device_secret.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    return signature, timestamp
+
+def generate_fingerprint():
+    raw = f"{platform.node()}-{uuid.getnode()}-{platform.system()}"
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 APP_NAME = "MyDesktopApp"
 BASE_DIR = os.path.join(os.getenv("LOCALAPPDATA"), APP_NAME)
@@ -148,8 +186,13 @@ def api_worker(api_name, data):
     log.info(f"[THREAD STARTED] {api_name} | sensor_id={sensor_id}")
 
     while running_threads.get(api_name):
+
+        if not DEVICE_STATE["verified"]:
+          log.warning("❌ Device not activated, skipping publish")
+          time.sleep(interval)
+          continue
+
         try:
-            # ✅ Shared token use karo — koi naya token request nahi
             token = get_shared_token()
             if not token:
                 log.error(f"[API] No token for {api_name}, retrying in 10s")
@@ -160,8 +203,6 @@ def api_worker(api_name, data):
             r = requests.get(api_url, headers=headers, verify=False, timeout=5)
 
             if r.status_code == 401:
-                # ✅ Token expire hua — sirf ek baar invalidate karo
-                # Lock ensure karega ki sirf ek thread token refresh kare
                 invalidate_token()
                 log.warning(f"[API] Token expired, refreshing...")
                 continue
@@ -173,7 +214,9 @@ def api_worker(api_name, data):
 
             if value is not None:
                 utc_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
                 save_sensor_data(sensor_id, value, response_json)
+
                 publish_sensor_data(
                     sensor_id    = sensor_id,
                     sensor_name  = api_name,
@@ -183,6 +226,7 @@ def api_worker(api_name, data):
                     quality_good = quality_good,
                     timestamp    = utc_timestamp
                 )
+
                 log.info(f"[DATA] {api_name} | value={value} | ts={utc_timestamp}")
 
             api_status[api_name] = "online"
@@ -194,7 +238,10 @@ def api_worker(api_name, data):
         time.sleep(interval)
 
     log.info(f"[THREAD STOPPED] {api_name}")
-
+    
+    
+    
+    
 # ---------------- START THREADS ----------------
 def start_api_threads(t_api, username, password):
     set_token_credentials(t_api, username, password)
@@ -213,82 +260,155 @@ def start_api_threads(t_api, username, password):
 
 # ---------------- AUTO RESTART ----------------
 def restart_saved_apis():
-    login_data = load_json(LOGIN_FILE)
-    if not login_data:
-        log.info("[AUTO RESTART] No login data found.")
+    """
+    🔥 Restart APIs ONLY if session already valid
+
+    (No login.json dependency anymore)
+    """
+
+    if not session.get("logged_in"):
+        log.info("[AUTO RESTART] No active session.")
         return
-    t_api    = login_data.get("token_api")
-    username = login_data.get("username")
-    password = login_data.get("password")
-    log.info("[AUTO RESTART] Starting saved API threads...")
-    start_api_threads(t_api, username, password)
+
+    log.info("[AUTO RESTART] Restarting APIs...")
+
+    start_api_threads(
+        token_api_url,
+        token_username,
+        token_password
+    )
 
 # ---------------- ROUTES ----------------
 @app.route("/")
 def index():
-    login_data = load_json(LOGIN_FILE)
-    if login_data:
-        session.update(login_data)
-        session["logged_in"] = True
-        return redirect("/activate_client")
+    """
+     Entry point of app
+
+    NEW FLOW:
+    - If user already logged in → go to dashboard
+    - Else → go to login
+    """
+
+    if session.get("logged_in"):
+        return redirect("/welcome")
+
     return redirect("/login")
+
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        # ✅ Login ke liye ek baar token verify karo
+
+        email = request.form["email"]
+        password = request.form["password"]
+
+        fingerprint = generate_fingerprint()
+
         try:
-            r = requests.post(
-                request.form["token_api"],
-                data=f"grant_type=password&username={request.form['username']}&password={request.form['password']}",
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                verify=False,
-                timeout=5
+            device_data = load_device()
+            device_secret = device_data.get("device_secret")
+
+            payload = {
+                "email": email,
+                "password": password,
+                "machine_fingerprint": fingerprint
+            }
+
+            # 🔥 ADD HMAC IF DEVICE ALREADY ACTIVATED
+            if device_secret:
+                signature, timestamp = generate_signature(email, device_secret)
+                payload["signature"] = signature
+                payload["timestamp"] = timestamp
+
+            res = requests.post(
+                f"{CLOUD_URL}/login-site-admin",
+                json=payload
             )
-            r.raise_for_status()
-            token = r.json().get("access_token")
-        except:
-            token = None
 
-        if not token:
-            flash("Login Failed", "danger")
-            return render_template("login.html")
+            data = res.json()
 
-        data = {
-            "username":  request.form["username"],
-            "password":  request.form["password"],
-            "token_api": request.form["token_api"]
-        }
-        save_json(LOGIN_FILE, data)
-        session.update(data)
-        session["logged_in"] = True
+            if res.status_code != 200:
+                flash(data.get("message", "Login failed"), "danger")
+                return render_template("login.html")
 
-        # ✅ Credentials set karo aur shared token save karo
-        set_token_credentials(data["token_api"], data["username"], data["password"])
-        shared_token_ref = token  # Login ka token directly use karo
-        global shared_token
-        shared_token = token
-        log.info("[LOGIN] Token saved from login response")
+            # 🔴 ACTIVATION REQUIRED
+            if data.get("activation_required"):
+                session["email"] = email
+                session["password"] = password
+                session["site_id"] = data["site_id"]
+                session["organization_id"] = data["organization_id"]
 
-        start_api_threads(data["token_api"], data["username"], data["password"])
-        return redirect("/activate_client")
+                return redirect("/activate_client")
+
+            # 🟢 SUCCESS LOGIN
+            session["logged_in"] = True
+            session["client_verified"] = True
+            DEVICE_STATE["verified"] = True 
+
+            session["client_id"] = data["organization_id"]
+            session["site_id"] = data["site_id"]
+
+            CLIENT_INFO["client_id"] = data["organization_id"]
+            CLIENT_INFO["site_id"] = data["site_id"]
+
+            # 🔥 STORE DEVICE SECRET (CRITICAL)
+            if data.get("device_secret"):
+                save_device({
+                    "device_secret": data["device_secret"]
+                })
+                log.info("✅ Device secret saved locally")
+
+            return redirect("/welcome")
+
+        except Exception as e:
+            log.error(f"[LOGIN ERROR] {e}")
+            flash("Server error", "danger")
+
     return render_template("login.html")
+
+
+
 
 @app.route("/activate_client", methods=["GET", "POST"])
 def activate_client():
-    if not session.get("logged_in"):
+    if not session.get("email"):
         return redirect("/login")
+
     if request.method == "POST":
-        client_id = request.form["client_id"]
-        site_id   = request.form["site_id"]
-        save_client_info(client_id, [site_id])
-        session["client_verified"] = True
-        session["client_id"]       = client_id
-        session["site_id"]         = site_id
-        CLIENT_INFO["client_id"]   = client_id
-        CLIENT_INFO["site_id"]     = site_id
-        return redirect("/welcome")
+
+        fingerprint = generate_fingerprint()
+        site_id = session.get("site_id")
+
+        try:
+            res = requests.post(
+                f"{CLOUD_URL}/request-activation",
+                json={
+                    "site_id": site_id,
+                    "machine_fingerprint": fingerprint
+                }
+            )
+
+            data = res.json()
+
+            if res.status_code != 200:
+                flash(data.get("message", "Activation failed"), "danger")
+                return redirect("/activate_client")
+
+            # ❌ DO NOT MARK VERIFIED
+            # ❌ DO NOT STORE device_secret
+
+            flash("✅ Activation request sent. Waiting for admin approval.", "warning")
+
+            return redirect("/login")
+
+        except Exception as e:
+            log.error(f"[ACTIVATION ERROR] {e}")
+            flash("Activation error", "danger")
+
     return render_template("client_activation.html")
+
+
+
 
 @app.route("/welcome")
 def welcome():
