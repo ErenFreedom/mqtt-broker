@@ -109,8 +109,8 @@ token_username    = None
 token_password    = None
 
 def fetch_new_token():
-    """Server se ek naya token lo"""
     global shared_token
+
     try:
         r = requests.post(
             token_api_url,
@@ -119,30 +119,55 @@ def fetch_new_token():
             verify=False,
             timeout=5
         )
+
         r.raise_for_status()
+
         token = r.json().get("access_token")
+
         if token:
             shared_token = token
-            log.info("[TOKEN] ✅ New token fetched successfully")
-        else:
-            log.error("[TOKEN] ❌ Token not found in response")
+
+            # 🔥 SAVE UPDATED TOKEN
+            save_token({
+                "access_token": token,
+                "api_url": token_api_url,
+                "username": token_username,
+                "password": token_password,
+                "last_updated": int(time.time())
+            })
+
+            log.info("[TOKEN] ✅ Refreshed & saved new token")
+
         return token
+
     except Exception as e:
         log.error(f"[TOKEN ERROR] {e}")
         return None
-
+    
+    
+    
 def get_shared_token():
-    """
-    Shared token return karo.
-    Agar token nahi hai to sirf ek baar fetch karo — lock se ensure karo
-    ki ek saath sirf ek request jaaye.
-    """
     global shared_token
-    with shared_token_lock:
-        if not shared_token:
-            fetch_new_token()
-        return shared_token
 
+    with shared_token_lock:
+
+        if shared_token:
+            return shared_token
+
+        # 🔥 LOAD FROM FILE IF NOT IN MEMORY
+        token_data = load_token()
+
+        if token_data.get("access_token"):
+            shared_token = token_data["access_token"]
+            return shared_token
+
+        # 🔥 FETCH NEW TOKEN USING SAVED CREDS
+        fetch_new_token()
+
+        return shared_token
+    
+    
+    
 def invalidate_token():
     """Token expire hone pe clear karo — agli request pe ek baar refresh hoga"""
     global shared_token
@@ -287,29 +312,38 @@ def start_api_threads(t_api, username, password):
 
 # ---------------- AUTO RESTART ----------------
 def restart_saved_apis():
- 
+
+    # 🔥 LOAD DEVICE (activation state)
     device_data = load_device()
-
     device_secret = device_data.get("device_secret")
- 
+
     if not device_secret:
-
         log.info("[AUTO RESTART] Device not activated yet.")
-
         return
- 
+
+    # 🔥 LOAD DESIGO TOKEN DATA
+    token_data = load_token()
+
+    if not token_data.get("access_token"):
+        log.info("[AUTO RESTART] No Desigo token found.")
+        return
+
+    # 🔥 SET TOKEN CONFIG (IMPORTANT)
+    set_token_credentials(
+        token_data.get("api_url"),
+        token_data.get("username"),
+        token_data.get("password")
+    )
+
     log.info("[AUTO RESTART] Restarting APIs...")
- 
+
     DEVICE_STATE["verified"] = True
- 
+
+    # 🔥 START THREADS
     start_api_threads(
-
         token_api_url,
-
         token_username,
-
         token_password
-
     )
  
 # ---------------- ROUTES ----------------
@@ -465,39 +499,40 @@ def desigo_login():
 
     if request.method == "POST":
 
+        api_url = request.form["api_url"]
         username = request.form["username"]
         password = request.form["password"]
 
         try:
-            # 🔥 YOUR DESIGO TOKEN API
-            token_url = "<PUT_YOUR_DESIGO_TOKEN_URL_HERE>"
-
             res = requests.post(
-                token_url,
+                api_url,
                 data=f"grant_type=password&username={username}&password={password}",
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
-                verify=False
+                verify=False,
+                timeout=5
             )
 
             if res.status_code != 200:
-                flash("Invalid Desigo credentials", "danger")
+                flash(f"Invalid Desigo credentials | {res.text}", "danger")
                 return render_template("desigo_login.html")
 
             token = res.json().get("access_token")
 
             if not token:
-                flash("Token not received", "danger")
+                flash("Token not received from Desigo", "danger")
                 return render_template("desigo_login.html")
 
-            # ✅ SAVE TOKEN
+            # ✅ SAVE EVERYTHING (IMPORTANT)
             save_token({
                 "access_token": token,
+                "api_url": api_url,
                 "username": username,
-                "password": password
+                "password": password,
+                "last_updated": int(time.time())
             })
 
-            # ✅ SET GLOBAL TOKEN SYSTEM
-            set_token_credentials(token_url, username, password)
+            # ✅ SET GLOBAL TOKEN CONFIG
+            set_token_credentials(api_url, username, password)
 
             flash("✅ Desigo connected successfully", "success")
 
@@ -505,10 +540,11 @@ def desigo_login():
 
         except Exception as e:
             log.error(f"[DESIGO LOGIN ERROR] {e}")
+            log.error(traceback.format_exc())
+
             flash("Connection error", "danger")
 
     return render_template("desigo_login.html")
-
 
 
 @app.route("/welcome")
