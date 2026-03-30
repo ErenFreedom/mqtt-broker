@@ -1,4 +1,5 @@
 import threading
+import traceback
 import requests
 import urllib3
 import os
@@ -8,12 +9,20 @@ import logging
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, request, redirect, session, flash, jsonify
-CLOUD_URL = "http://34.14.145.160/api/edge"
+CLOUD_URL = "https://34.14.145.160/api/edge"
 from database_service import (
     create_sensor, save_sensor_data, get_latest_sensor_value, save_client_info
 )
 from mqtt_service import CLIENT_INFO, publish_sensor_data
-
+APP_NAME = "MyDesktopApp"
+ 
+BASE_DIR = os.path.join(os.getenv("LOCALAPPDATA") or ".", APP_NAME)
+os.makedirs(BASE_DIR, exist_ok=True)
+ 
+DEVICE_FILE = os.path.join(BASE_DIR, "device.json")
+LOGIN_FILE  = os.path.join(BASE_DIR, "login.json")
+API_FILE    = os.path.join(BASE_DIR, "apis.json")
+LOG_FILE    = os.path.join(BASE_DIR, "app.log")
 DEVICE_STATE = {
     "verified": False
 }
@@ -260,24 +269,31 @@ def start_api_threads(t_api, username, password):
 
 # ---------------- AUTO RESTART ----------------
 def restart_saved_apis():
-    """
-    🔥 Restart APIs ONLY if session already valid
+ 
+    device_data = load_device()
 
-    (No login.json dependency anymore)
-    """
+    device_secret = device_data.get("device_secret")
+ 
+    if not device_secret:
 
-    if not session.get("logged_in"):
-        log.info("[AUTO RESTART] No active session.")
+        log.info("[AUTO RESTART] Device not activated yet.")
+
         return
-
+ 
     log.info("[AUTO RESTART] Restarting APIs...")
-
+ 
+    DEVICE_STATE["verified"] = True
+ 
     start_api_threads(
-        token_api_url,
-        token_username,
-        token_password
-    )
 
+        token_api_url,
+
+        token_username,
+
+        token_password
+
+    )
+ 
 # ---------------- ROUTES ----------------
 @app.route("/")
 def index():
@@ -322,7 +338,8 @@ def login():
 
             res = requests.post(
                 f"{CLOUD_URL}/login-site-admin",
-                json=payload
+                json=payload, 
+                verify=False
             )
 
             data = res.json()
@@ -361,8 +378,16 @@ def login():
             return redirect("/welcome")
 
         except Exception as e:
-            log.error(f"[LOGIN ERROR] {e}")
-            flash("Server error", "danger")
+   
+         log.error(f"[LOGIN ERROR] {e}")
+         log.error(traceback.format_exc())   # 🔥 FULL STACK TRACE
+ 
+         print("\n===== LOGIN ERROR =====")
+         print(e)
+         traceback.print_exc()
+         print("=======================\n")
+ 
+         flash("Server error", "danger")
 
     return render_template("login.html")
 
@@ -385,7 +410,8 @@ def activate_client():
                 json={
                     "site_id": site_id,
                     "machine_fingerprint": fingerprint
-                }
+                },
+                verify=False
             )
 
             data = res.json()
