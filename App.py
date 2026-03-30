@@ -34,6 +34,17 @@ import platform
 import hmac
 
 DEVICE_FILE = os.path.join(BASE_DIR, "device.json")
+TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
+
+def save_token(data):
+    with open(TOKEN_FILE, "w") as f:
+        json.dump(data, f)
+
+def load_token():
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, "r") as f:
+            return json.load(f)
+    return {}
 
 def save_device(data):
     with open(DEVICE_FILE, "w") as f:
@@ -197,9 +208,16 @@ def api_worker(api_name, data):
     while running_threads.get(api_name):
 
         if not DEVICE_STATE["verified"]:
-          log.warning("❌ Device not activated, skipping publish")
-          time.sleep(interval)
-          continue
+           log.warning("❌ Device not activated, skipping publish")
+           time.sleep(interval)
+           continue
+
+# 🔥 NEW CHECK (DESIGO TOKEN)
+        token_data = load_token()
+        if not token_data.get("access_token"):
+           log.warning("❌ No Desigo token, skipping API")
+           time.sleep(interval)
+           continue
 
         try:
             token = get_shared_token()
@@ -338,7 +356,7 @@ def login():
 
             res = requests.post(
                 f"{CLOUD_URL}/login-site-admin",
-                json=payload, 
+                json=payload,
                 verify=False
             )
 
@@ -368,26 +386,31 @@ def login():
             CLIENT_INFO["client_id"] = data["organization_id"]
             CLIENT_INFO["site_id"] = data["site_id"]
 
-            # 🔥 STORE DEVICE SECRET (CRITICAL)
+            # 🔥 STORE DEVICE SECRET
             if data.get("device_secret"):
                 save_device({
                     "device_secret": data["device_secret"]
                 })
                 log.info("✅ Device secret saved locally")
 
+            # 🔥 NEW LOGIC (IMPORTANT)
+            token_data = load_token()
+
+            if not token_data.get("access_token"):
+                return redirect("/desigo_login")
+
             return redirect("/welcome")
 
         except Exception as e:
-   
-         log.error(f"[LOGIN ERROR] {e}")
-         log.error(traceback.format_exc())   # 🔥 FULL STACK TRACE
- 
-         print("\n===== LOGIN ERROR =====")
-         print(e)
-         traceback.print_exc()
-         print("=======================\n")
- 
-         flash("Server error", "danger")
+            log.error(f"[LOGIN ERROR] {e}")
+            log.error(traceback.format_exc())
+
+            print("\n===== LOGIN ERROR =====")
+            print(e)
+            traceback.print_exc()
+            print("=======================\n")
+
+            flash("Server error", "danger")
 
     return render_template("login.html")
 
@@ -433,6 +456,58 @@ def activate_client():
 
     return render_template("client_activation.html")
 
+
+@app.route("/desigo_login", methods=["GET", "POST"])
+def desigo_login():
+
+    if not session.get("logged_in"):
+        return redirect("/login")
+
+    if request.method == "POST":
+
+        username = request.form["username"]
+        password = request.form["password"]
+
+        try:
+            # 🔥 YOUR DESIGO TOKEN API
+            token_url = "<PUT_YOUR_DESIGO_TOKEN_URL_HERE>"
+
+            res = requests.post(
+                token_url,
+                data=f"grant_type=password&username={username}&password={password}",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                verify=False
+            )
+
+            if res.status_code != 200:
+                flash("Invalid Desigo credentials", "danger")
+                return render_template("desigo_login.html")
+
+            token = res.json().get("access_token")
+
+            if not token:
+                flash("Token not received", "danger")
+                return render_template("desigo_login.html")
+
+            # ✅ SAVE TOKEN
+            save_token({
+                "access_token": token,
+                "username": username,
+                "password": password
+            })
+
+            # ✅ SET GLOBAL TOKEN SYSTEM
+            set_token_credentials(token_url, username, password)
+
+            flash("✅ Desigo connected successfully", "success")
+
+            return redirect("/welcome")
+
+        except Exception as e:
+            log.error(f"[DESIGO LOGIN ERROR] {e}")
+            flash("Connection error", "danger")
+
+    return render_template("desigo_login.html")
 
 
 
