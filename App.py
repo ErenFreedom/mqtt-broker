@@ -238,11 +238,12 @@ def api_worker(api_name, data):
            continue
 
 # 🔥 NEW CHECK (DESIGO TOKEN)
-        token_data = load_token()
-        if not token_data.get("access_token"):
-           log.warning("❌ No Desigo token, skipping API")
-           time.sleep(interval)
-           continue
+        token = get_shared_token()
+
+        if not token:
+          log.error(f"[API] No token for {api_name}, retrying in 10s")
+          time.sleep(10)
+          continue
 
         try:
             token = get_shared_token()
@@ -255,9 +256,18 @@ def api_worker(api_name, data):
             r = requests.get(api_url, headers=headers, verify=False, timeout=5)
 
             if r.status_code == 401:
-                invalidate_token()
                 log.warning(f"[API] Token expired, refreshing...")
-                continue
+                invalidate_token()
+                
+                token = get_shared_token()
+                
+                if not token:
+                  log.error(f"[API] Token refresh failed for {api_name}")
+                  time.sleep(10)
+                  continue
+                
+                headers = {"Authorization": f"Bearer {token}"}
+                r = requests.get(api_url, headers=headers, verify=False, timeout=5)
 
             r.raise_for_status()
             response_json = r.json()
@@ -428,12 +438,16 @@ def login():
                 log.info("✅ Device secret saved locally")
 
             # 🔥 NEW LOGIC (IMPORTANT)
-            token_data = load_token()
+            global shared_token
+            shared_token = None
+            
+            if os.path.exists(TOKEN_FILE):
+                os.remove(TOKEN_FILE)
+                log.info("[TOKEN] Old token cleared on login")
 
-            if not token_data.get("access_token"):
-                return redirect("/desigo_login")
+            
 
-            return redirect("/welcome")
+            return redirect("/desigo_login")
 
         except Exception as e:
             log.error(f"[LOGIN ERROR] {e}")
