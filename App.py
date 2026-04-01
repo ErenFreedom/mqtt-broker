@@ -36,6 +36,16 @@ import hmac
 DEVICE_FILE = os.path.join(BASE_DIR, "device.json")
 TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
 
+def clear_token_on_start():
+    if os.path.exists(TOKEN_FILE):
+        data = load_token()
+
+        # Keep creds, remove token
+        data["access_token"] = None
+
+        save_token(data)
+        log.info("[TOKEN] Cleared access token on app start")
+
 def save_token(data):
     with open(TOKEN_FILE, "w") as f:
         json.dump(data, f)
@@ -151,21 +161,28 @@ def get_shared_token():
 
     with shared_token_lock:
 
+        # in-memory
         if shared_token:
             return shared_token
 
-        # 🔥 LOAD FROM FILE IF NOT IN MEMORY
         token_data = load_token()
 
+        # file token
         if token_data.get("access_token"):
             shared_token = token_data["access_token"]
             return shared_token
 
-        # 🔥 FETCH NEW TOKEN USING SAVED CREDS
-        fetch_new_token()
+        # 🔥 NO TOKEN → FETCH USING STORED CREDS
+        if token_data.get("api_url") and token_data.get("username") and token_data.get("password"):
+            set_token_credentials(
+                token_data.get("api_url"),
+                token_data.get("username"),
+                token_data.get("password")
+            )
+            return fetch_new_token()
 
-        return shared_token
-    
+        log.error("[TOKEN] No credentials available")
+        return None
     
     
 def invalidate_token():
@@ -392,7 +409,6 @@ def login():
                 "machine_fingerprint": fingerprint
             }
 
-            # 🔥 ADD HMAC IF DEVICE ALREADY ACTIVATED
             if device_secret:
                 signature, timestamp = generate_signature(email, device_secret)
                 payload["signature"] = signature
@@ -410,16 +426,15 @@ def login():
                 flash(data.get("message", "Login failed"), "danger")
                 return render_template("login.html")
 
-            # 🔴 ACTIVATION REQUIRED
+            # ACTIVATION FLOW
             if data.get("activation_required"):
                 session["email"] = email
                 session["password"] = password
                 session["site_id"] = data["site_id"]
                 session["organization_id"] = data["organization_id"]
-
                 return redirect("/activate_client")
 
-            # 🟢 SUCCESS LOGIN
+            # SUCCESS LOGIN
             session["logged_in"] = True
             session["client_verified"] = True
             DEVICE_STATE["verified"] = True 
@@ -430,42 +445,26 @@ def login():
             CLIENT_INFO["client_id"] = data["organization_id"]
             CLIENT_INFO["site_id"] = data["site_id"]
 
-            # 🔥 STORE DEVICE SECRET
+            # STORE DEVICE SECRET
             if data.get("device_secret"):
                 save_device({
                     "device_secret": data["device_secret"]
                 })
                 log.info("✅ Device secret saved locally")
 
-            
+            # 🔥 IMPORTANT CHANGE
+            global shared_token
+            shared_token = None  # force fresh desigo login
 
-            
-
-            token_data = load_token()
-            if token_data.get("access_token"):
-                log.info("[TOKEN] Using existing token")
-                set_token_credentials(
-                  token_data.get("api_url"),
-                  token_data.get("username"),
-                  token_data.get("password")
-                )
-                return redirect("/welcome")
+            # 🔥 ALWAYS GO TO DESIGO LOGIN
             return redirect("/desigo_login")
 
         except Exception as e:
             log.error(f"[LOGIN ERROR] {e}")
             log.error(traceback.format_exc())
-
-            print("\n===== LOGIN ERROR =====")
-            print(e)
-            traceback.print_exc()
-            print("=======================\n")
-
             flash("Server error", "danger")
 
     return render_template("login.html")
-
-
 
 
 @app.route("/activate_client", methods=["GET", "POST"])
@@ -627,7 +626,10 @@ def start_flask():
 
 if __name__ == "__main__":
     import webview
+
+    clear_token_on_start()   
     restart_saved_apis()
+
     threading.Thread(target=start_flask, daemon=True).start()
     webview.create_window("Edge_connector", "http://127.0.0.1:5000", width=1200, height=800)
     webview.start()
