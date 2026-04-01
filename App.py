@@ -437,16 +437,19 @@ def login():
                 })
                 log.info("✅ Device secret saved locally")
 
-            # 🔥 NEW LOGIC (IMPORTANT)
-            global shared_token
-            shared_token = None
             
-            if os.path.exists(TOKEN_FILE):
-                os.remove(TOKEN_FILE)
-                log.info("[TOKEN] Old token cleared on login")
 
             
 
+            token_data = load_token()
+            if token_data.get("access_token"):
+                log.info("[TOKEN] Using existing token")
+                set_token_credentials(
+                  token_data.get("api_url"),
+                  token_data.get("username"),
+                  token_data.get("password")
+                )
+                return redirect("/welcome")
             return redirect("/desigo_login")
 
         except Exception as e:
